@@ -1,0 +1,131 @@
+name: build-pr
+run-name: "build ${{ inputs.packages }} from ${{ inputs.repo }}#${{ inputs.pr-number }}"
+
+permissions: {}
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "GitHub repository (owner/name)"
+        required: true
+        type: string
+
+      pr-number:
+        description: "Pull Request number"
+        required: true
+        type: number
+
+      packages:
+        description: "Nix packages or flake attributes to build"
+        required: true
+        type: string
+
+      x86_64-linux:
+        description: "Build on x86_64-linux"
+        required: true
+        type: boolean
+        default: true
+
+      aarch64-linux:
+        description: "Build on aarch64-linux"
+        required: true
+        type: boolean
+        default: true
+
+      x86_64-darwin:
+        description: "Build on x86_64-darwin"
+        required: true
+        type: choice
+        default: yes_sandbox_relaxed
+        options:
+          - "no"
+          - yes_sandbox_false
+          - yes_sandbox_relaxed
+          - yes_sandbox_true
+
+      aarch64-darwin:
+        description: "Build on aarch64-darwin"
+        required: true
+        type: choice
+        default: yes_sandbox_relaxed
+        options:
+          - "no"
+          - yes_sandbox_false
+          - yes_sandbox_relaxed
+          - yes_sandbox_true
+
+      upterm:
+        description: "Start upterm session after nix build"
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - x86_64-linux
+          - aarch64-linux
+          - x86_64-darwin
+          - aarch64-darwin
+        exclude:
+          - system: ${{ !inputs.x86_64-linux && 'x86_64-linux' || '' }}
+          - system: ${{ !inputs.aarch64-linux && 'aarch64-linux' || '' }}
+          - system: ${{ inputs.x86_64-darwin == 'no' && 'x86_64-darwin' || '' }}
+          - system: ${{ inputs.aarch64-darwin == 'no' && 'aarch64-darwin' || '' }}
+
+    runs-on: >-
+      ${{ (matrix.system == 'x86_64-linux' && 'ubuntu-latest')
+      || (matrix.system == 'aarch64-linux' && 'ubuntu-24.04-arm')
+      || (matrix.system == 'x86_64-darwin' && 'macos-latest')
+      || (matrix.system == 'aarch64-darwin' && 'macos-latest') }}
+
+    steps:
+      - name: Checkout workflow repo
+        uses: actions/checkout@v6
+        with:
+          path: gha
+
+      - name: Setup Nix
+        uses: ./gha/.github/actions/setup-nix
+        with:
+          extra-nix-config: ${{ vars.EXTRA_NIX_CONFIG }}
+          system: ${{ matrix.system }}
+          sandbox: ${{
+            (matrix.system == 'x86_64-darwin' && inputs.x86_64-darwin == 'yes_sandbox_false'
+            || matrix.system == 'aarch64-darwin' && inputs.aarch64-darwin == 'yes_sandbox_false') && 'false'
+            || (matrix.system == 'x86_64-darwin' && inputs.x86_64-darwin == 'yes_sandbox_relaxed'
+            || matrix.system == 'aarch64-darwin' && inputs.aarch64-darwin == 'yes_sandbox_relaxed') && 'relaxed'
+            || 'true' }}
+
+      - name: Checkout PR
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.repo }}
+          ref: refs/pull/${{ inputs.pr-number }}/head
+          fetch-depth: 0
+          path: src
+
+      - name: Nix build
+        working-directory: src
+        run: |
+          nix build \
+            --keep-going \
+            -L \
+            --no-link \
+            .#${{ inputs.packages }}
+
+      - name: Set GITHUB_TOKEN for upterm
+        if: ${{ inputs.upterm }}
+        run: echo "GITHUB_TOKEN=${GITHUB_TOKEN}" >> "$GITHUB_ENV"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Start upterm session
+        if: ${{ inputs.upterm }}
+        uses: owenthereal/action-upterm@v1
+        with:
+          limit-access-to-actor: true
