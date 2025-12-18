@@ -112,11 +112,11 @@ jobs:
       - name: Nix build
         working-directory: src
         run: |
-          nix build \
-            --keep-going \
-            -L \
-            --no-link \
-            .#${{ inputs.packages }}
+          nix run github:Mic92/nix-fast-build -- \
+            --flake .#${{ inputs.packages }} \
+            --skip-cached \
+            --eval-workers 2 \
+            --eval-max-memory-size 6144
 
       - name: Set GITHUB_TOKEN for upterm
         if: ${{ inputs.upterm }}
