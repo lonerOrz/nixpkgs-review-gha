@@ -61,6 +61,12 @@ on:
         type: boolean
         default: false
 
+      post-result:
+        description: "Post Result"
+        required: true
+        type: boolean
+        default: true
+
 jobs:
   build:
     strategy:
@@ -110,6 +116,7 @@ jobs:
           path: src
 
       - name: Nix build
+        id: nix-build
         working-directory: src
         run: |
           nix build \
@@ -129,3 +136,96 @@ jobs:
         uses: owenthereal/action-upterm@v1
         with:
           limit-access-to-actor: true
+
+      - name: Generate build report
+        id: report
+        if: ${{ always() }} # 即使构建失败也要运行
+        run: |
+          # 检查上一步（nix build）的执行结果
+          if [ "${{ steps.nix-build.outcome }}" == "success" ] || [ "${{ steps.nix-build.conclusion }}" == "success" ]; then
+            BUILD_SUCCESSFUL="true"
+          else
+            BUILD_SUCCESSFUL="false"
+          fi
+
+          # 创建报告内容
+          cat << EOF > build_report_${{ matrix.system }}.md
+          ### \`${{ matrix.system }}\`
+          - Package(s): \`${{ inputs.packages }}\`
+          - Status: $(if [[ "$BUILD_SUCCESSFUL" == "true" ]]; then echo ":white_check_mark: Success"; else echo ":x: Failed"; fi)
+          - Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          EOF
+
+          # 创建 JSON 报告
+          jq -n --arg md "$(cat build_report_${{ matrix.system }}.md)" \
+             --arg successful "$BUILD_SUCCESSFUL" \
+             --arg system "${{ matrix.system }}" \
+             '{"md": $md, "successful": ($successful | test("true")), "system": $system}' > build_report_${{ matrix.system }}.json
+
+          echo "successful=$BUILD_SUCCESSFUL" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: build_report_${{ matrix.system }}.json
+          path: build_report_${{ matrix.system }}.json
+          if-no-files-found: error
+
+  report:
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: ${{ inputs.post-result }}
+    outputs:
+      success: ${{ steps.report.outputs.success }}
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          merge-multiple: true
+
+      - name: Generate combined report
+        id: report
+        run: |
+          echo -e "## Build Results\n" >> report.md
+          echo -e "Generated using [\`nixpkgs-review-gha\`](https://github.com/Defelo/nixpkgs-review-gha)\n" >> report.md
+          echo -e "Command: \`nix build .#${{ inputs.packages }}\`" >> report.md
+          echo -e "Repository: ${{ inputs.repo }}" >> report.md
+          echo -e "PR: #${{ inputs.pr-number }}" >> report.md
+          echo -e "Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n" >> report.md
+
+          # 合并所有系统的报告
+          for report_file in build_report_*.json; do
+            if [[ -f "$report_file" ]]; then
+              jq -r '.md' "$report_file" >> report.md
+              echo "" >> report.md
+            fi
+          done
+
+          # 检查是否所有构建都成功
+          all_successful=$(jq -s 'all(.[].successful)' build_report_*.json 2>/dev/null || echo "false")
+          echo "success=$all_successful" >> "$GITHUB_OUTPUT"
+
+          cat report.md
+          sed -e '1s|$| for [#'"${{ inputs.pr-number }}"'](${{ github.server_url }}/${{ inputs.repo }}/pull/'"${{ inputs.pr-number }}"')|' report.md >> $GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: report.md
+          path: report.md
+          if-no-files-found: error
+
+  post-result:
+    runs-on: ubuntu-latest
+    needs: [report]
+    if: ${{ inputs.post-result }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: report.md
+
+      - name: Post comment
+        run: |
+          if [[ -n "$GH_TOKEN" ]]; then
+            gh pr comment ${{ inputs.pr-number }} -R ${{ inputs.repo }} -F report.md
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
