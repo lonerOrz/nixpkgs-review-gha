@@ -125,6 +125,7 @@ jobs:
             --no-link \
             .#${{ inputs.packages }}
 
+
       - name: Set GITHUB_TOKEN for upterm
         if: ${{ inputs.upterm }}
         run: echo "GITHUB_TOKEN=${GITHUB_TOKEN}" >> "$GITHUB_ENV"
@@ -136,6 +137,7 @@ jobs:
         uses: owenthereal/action-upterm@v1
         with:
           limit-access-to-actor: true
+        continue-on-error: true
 
       - name: Generate build report
         id: report
@@ -165,6 +167,7 @@ jobs:
           echo "successful=$BUILD_SUCCESSFUL" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v6
+        if: ${{ always() }}
         with:
           name: build_report_${{ matrix.system }}.json
           path: build_report_${{ matrix.system }}.json
@@ -173,7 +176,7 @@ jobs:
   report:
     runs-on: ubuntu-latest
     needs: [build]
-    if: ${{ inputs.post-result }}
+    if: ${{ always() && inputs.post-result }}
     outputs:
       success: ${{ steps.report.outputs.success }}
 
@@ -208,6 +211,7 @@ jobs:
           sed -e '1s|$| for [#'"${{ inputs.pr-number }}"'](${{ github.server_url }}/${{ inputs.repo }}/pull/'"${{ inputs.pr-number }}"')|' report.md >> $GITHUB_STEP_SUMMARY
 
       - uses: actions/upload-artifact@v6
+        if: ${{ always() }}
         with:
           name: report.md
           path: report.md
@@ -216,7 +220,7 @@ jobs:
   post-result:
     runs-on: ubuntu-latest
     needs: [report]
-    if: ${{ inputs.post-result }}
+    if: ${{ always() && inputs.post-result }}
     steps:
       - uses: actions/download-artifact@v7
         with:
