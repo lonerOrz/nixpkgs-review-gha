@@ -125,7 +125,6 @@ jobs:
             --no-link \
             .#${{ inputs.packages }}
 
-
       - name: Set GITHUB_TOKEN for upterm
         if: ${{ inputs.upterm }}
         run: echo "GITHUB_TOKEN=${GITHUB_TOKEN}" >> "$GITHUB_ENV"
