@@ -67,6 +67,12 @@ on:
         type: boolean
         default: true
 
+      upload-cachix:
+        description: "Upload to Cachix"
+        required: true
+        type: boolean
+        default: true
+
 jobs:
   build:
     strategy:
@@ -232,3 +238,44 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+  upload-cachix:
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: ${{ needs.build.result == 'success' && inputs.upload-cachix }}
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.repo }}
+          ref: refs/pull/${{ inputs.pr-number }}/head
+          fetch-depth: 0
+          path: src
+
+      - name: Checkout workflow repo
+        uses: actions/checkout@v6
+        with:
+          path: gha
+
+      - name: Setup Nix
+        uses: ./gha/.github/actions/setup-nix
+        with:
+          extra-nix-config: ${{ vars.EXTRA_NIX_CONFIG }}
+          system: x86_64-linux
+          sandbox: true
+
+      - name: Install cachix
+        run: |
+          nix-env -iA cachix -f https://cachix.org/api/v1/install
+
+      - name: Authenticate with Cachix
+        run: |
+          cachix authtoken ${{ secrets.CACHIX_AUTH_TOKEN }}
+        if: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
+
+      - name: Upload to Cachix
+        working-directory: src
+        if: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
+        run: |
+          nix build .#${{ inputs.packages }} -L
+          cachix push loneros $(nix path-info .#${{ inputs.packages }})
