@@ -178,6 +178,22 @@ jobs:
           path: build_report_${{ matrix.system }}.json
           if-no-files-found: error
 
+      - name: Upload to Cachix
+        if: >-
+          ${{
+            matrix.system == 'x86_64-linux'
+            && inputs.upload-cachix
+            && env.CACHIX_TOKEN != ''
+            && steps.report.outputs.successful == 'true'
+          }}
+        working-directory: src
+        env:
+          CACHIX_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        continue-on-error: true
+        run: |
+          nix run nixpkgs#cachix -- authtoken "$CACHIX_TOKEN"
+          nix run nixpkgs#cachix -- push loneros $(nix path-info .#${{ inputs.packages }})
+
   report:
     runs-on: ubuntu-latest
     needs: [build]
@@ -238,55 +254,3 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
-  upload-cachix:
-    runs-on: ubuntu-latest
-    needs: [build]
-    if: ${{ needs.build.result == 'success' && inputs.upload-cachix }}
-    steps:
-      - name: Checkout PR
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ inputs.repo }}
-          ref: refs/pull/${{ inputs.pr-number }}/head
-          fetch-depth: 0
-          path: src
-
-      - name: Checkout workflow repo
-        uses: actions/checkout@v6
-        with:
-          path: gha
-
-      - name: Setup Nix
-        uses: ./gha/.github/actions/setup-nix
-        with:
-          extra-nix-config: ${{ vars.EXTRA_NIX_CONFIG }}
-          system: x86_64-linux
-          sandbox: true
-
-      - name: Install cachix
-        run: |
-          nix-env -iA cachix -f https://cachix.org/api/v1/install
-
-      - name: Authenticate with Cachix
-        env:
-          CACHIX_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        run: |
-          if [ -n "$CACHIX_TOKEN" ]; then
-            cachix authtoken "$CACHIX_TOKEN"
-          else
-            echo "CACHIX_AUTH_TOKEN not set, skipping"
-          fi
-
-      - name: Upload to Cachix
-        working-directory: src
-        env:
-          CACHIX_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        run: |
-          if [ -z "$CACHIX_TOKEN" ]; then
-            echo "No cachix token, skipping upload"
-            exit 0
-          fi
-
-          nix build .#${{ inputs.packages }} -L
-          cachix push loneros $(nix path-info .#${{ inputs.packages }})
