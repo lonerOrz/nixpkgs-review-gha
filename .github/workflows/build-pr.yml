@@ -279,6 +279,7 @@ jobs:
           fi
 
       - name: Upload to Cachix
+        working-directory: src
         env:
           CACHIX_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
