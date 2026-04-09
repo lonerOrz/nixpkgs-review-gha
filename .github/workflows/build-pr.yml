@@ -238,7 +238,7 @@ jobs:
   post-result:
     runs-on: ubuntu-latest
     needs: [report]
-    if: ${{ inputs.post-result }}
+    if: ${{ !cancelled() && inputs.post-result }}
     steps:
       - uses: actions/download-artifact@v7
         with:
