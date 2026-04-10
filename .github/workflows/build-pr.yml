@@ -257,7 +257,8 @@ jobs:
             done
 
             # Add log link
-            echo "- Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n" >> report.md
+            echo "- Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> report.md
+            echo "" >> report.md
           done
 
           # Check if all builds succeeded
