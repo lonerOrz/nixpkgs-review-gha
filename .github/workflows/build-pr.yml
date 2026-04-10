@@ -83,7 +83,7 @@ jobs:
         id: parse
         run: |
           # 将输入的包按空格或逗号分割，输出为 JSON 数组
-          PACKAGES_JSON=$(echo '${{ inputs.packages }}' | tr ',;' '  ' | jq -R -s -c 'split(" ") | map(select(length > 0))')
+          PACKAGES_JSON=$(echo '${{ inputs.packages }}' | tr '\n\t,;' '    ' | tr -s ' ' | jq -R -s -c 'split(" ") | map(select(length > 0))')
           echo "packages=$PACKAGES_JSON" >> "$GITHUB_OUTPUT"
 
   build:
