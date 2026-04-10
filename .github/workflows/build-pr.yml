@@ -82,7 +82,7 @@ jobs:
       - name: Parse packages
         id: parse
         run: |
-          # 将输入的包按空格或逗号分割，输出为 JSON 数组
+          # Split input packages by whitespace or commas, output as JSON array
           PACKAGES_JSON=$(echo '${{ inputs.packages }}' | tr '\n\t,;' '    ' | tr -s ' ' | jq -R -s -c 'split(" ") | map(select(length > 0))')
           echo "packages=$PACKAGES_JSON" >> "$GITHUB_OUTPUT"
 
@@ -161,14 +161,14 @@ jobs:
       - name: Generate build report
         id: report
         run: |
-          # 检查上一步（nix build）的执行结果
+          # Check the result of the previous step (nix build)
           if [ "${{ steps.nix-build.outcome }}" == "success" ] || [ "${{ steps.nix-build.conclusion }}" == "success" ]; then
             BUILD_SUCCESSFUL="true"
           else
             BUILD_SUCCESSFUL="false"
           fi
 
-          # 创建报告内容（包含包名和系统）
+          # Create report content (including package name and system)
           REPORT_FILE="build_report_${{ matrix.system }}_${{ matrix.package }}.md"
           JSON_FILE="build_report_${{ matrix.system }}_${{ matrix.package }}.json"
 
@@ -179,7 +179,7 @@ jobs:
           - Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           EOF
 
-          # 创建 JSON 报告
+          # Create JSON report
           jq -n --arg md "$(cat "$REPORT_FILE")" \
              --arg successful "$BUILD_SUCCESSFUL" \
              --arg system "${{ matrix.system }}" \
@@ -231,14 +231,14 @@ jobs:
           echo -e "PR: #${{ inputs.pr-number }}" >> report.md
           echo -e "Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n" >> report.md
 
-          # 按包聚合所有系统的结果
-          # 提取所有唯一的包名
+          # Aggregate results across all systems by package
+          # Extract unique package names
           packages=$(jq -s '[.[].package] | unique | .[]' -r build_report_*.json)
 
           for pkg in $packages; do
             echo -e "### \`${pkg}\`\n" >> report.md
 
-            # 获取该包在所有系统上的结果
+            # Get results for this package on all systems
             for report_file in build_report_*.json; do
               file_pkg=$(jq -r '.package' "$report_file")
               [[ "$file_pkg" == "$pkg" ]] || continue
@@ -254,11 +254,11 @@ jobs:
               fi
             done
 
-            # 添加日志链接
+            # Add log link
             echo "- Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n" >> report.md
           done
 
-          # 检查是否所有构建都成功
+          # Check if all builds succeeded
           all_successful=$(jq -s 'all(.[].successful)' build_report_*.json 2>/dev/null || echo "false")
           echo "success=$all_successful" >> "$GITHUB_OUTPUT"
 
@@ -285,5 +285,18 @@ jobs:
           if [[ -n "$GH_TOKEN" ]]; then
             gh pr comment ${{ inputs.pr-number }} -R ${{ inputs.repo }} -F report.md
           fi
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Add build-success label
+        if: ${{ needs.report.outputs.success == 'true' }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::warning::Cannot add label because no GH_TOKEN has been configured."
+            exit 0
+          fi
+          # Ensure label exists (ignore error if already exists)
+          gh label create "build-pr-success" --color "28a745" -R ${{ inputs.repo }} 2>/dev/null || true
+          gh pr edit ${{ inputs.pr-number }} -R ${{ inputs.repo }} --add-label "build-pr-success"
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
