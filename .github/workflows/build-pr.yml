@@ -262,8 +262,11 @@ jobs:
           done
 
           # Check if all builds succeeded
-          all_successful=$(jq -s 'all(.[].successful)' build_report_*.json 2>/dev/null || echo "false")
+          all_successful=$(jq -s '[.[].successful] | all' build_report_*.json 2>/dev/null || echo "false")
           echo "success=$all_successful" >> "$GITHUB_OUTPUT"
+          echo "DEBUG: all_successful=$all_successful" >&2
+          echo "DEBUG: files=$(ls build_report_*.json 2>/dev/null | tr '\n' ' ')" >&2
+          echo "DEBUG: json content sample: $(jq -s '.' build_report_*.json 2>/dev/null | head -c 200)" >&2
 
           cat report.md
           sed -e '1s|$| for [#'"${{ inputs.pr-number }}"'](${{ github.server_url }}/${{ inputs.repo }}/pull/'"${{ inputs.pr-number }}"')|' report.md >> "$GITHUB_STEP_SUMMARY"
