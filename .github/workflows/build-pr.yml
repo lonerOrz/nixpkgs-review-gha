@@ -74,7 +74,20 @@ on:
         default: true
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.parse.outputs.packages }}
+    steps:
+      - name: Parse packages
+        id: parse
+        run: |
+          # 将输入的包按空格或逗号分割，输出为 JSON 数组
+          PACKAGES_JSON=$(echo '${{ inputs.packages }}' | tr ',;' '  ' | jq -R -s -c 'split(" ") | map(select(length > 0))')
+          echo "packages=$PACKAGES_JSON" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: [prepare]
     strategy:
       fail-fast: false
       matrix:
@@ -83,6 +96,7 @@ jobs:
           - aarch64-linux
           - x86_64-darwin
           - aarch64-darwin
+        package: ${{ fromJson(needs.prepare.outputs.packages) }}
         exclude:
           - system: ${{ !inputs.x86_64-linux && 'x86_64-linux' || '' }}
           - system: ${{ !inputs.aarch64-linux && 'aarch64-linux' || '' }}
@@ -129,7 +143,7 @@ jobs:
             --keep-going \
             -L \
             --no-link \
-            .#${{ inputs.packages }}
+            .#${{ matrix.package }}
 
       - name: Set GITHUB_TOKEN for upterm
         if: ${{ inputs.upterm }}
@@ -154,26 +168,30 @@ jobs:
             BUILD_SUCCESSFUL="false"
           fi
 
-          # 创建报告内容
-          cat << EOF > build_report_${{ matrix.system }}.md
-          ### \`${{ matrix.system }}\`
-          - Package(s): \`${{ inputs.packages }}\`
+          # 创建报告内容（包含包名和系统）
+          REPORT_FILE="build_report_${{ matrix.system }}_${{ matrix.package }}.md"
+          JSON_FILE="build_report_${{ matrix.system }}_${{ matrix.package }}.json"
+
+          cat << EOF > "$REPORT_FILE"
+          ### \`${{ matrix.system }}\` - \`${{ matrix.package }}\`
+          - Package: \`${{ matrix.package }}\`
           - Status: $(if [[ "$BUILD_SUCCESSFUL" == "true" ]]; then echo ":white_check_mark: Success"; else echo ":x: Failed"; fi)
           - Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           EOF
 
           # 创建 JSON 报告
-          jq -n --arg md "$(cat build_report_${{ matrix.system }}.md)" \
+          jq -n --arg md "$(cat "$REPORT_FILE")" \
              --arg successful "$BUILD_SUCCESSFUL" \
              --arg system "${{ matrix.system }}" \
-             '{"md": $md, "successful": ($successful | test("true")), "system": $system}' > build_report_${{ matrix.system }}.json
+             --arg package "${{ matrix.package }}" \
+             '{"md": $md, "successful": ($successful | test("true")), "system": $system, "package": $package}' > "$JSON_FILE"
 
           echo "successful=$BUILD_SUCCESSFUL" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v6
         with:
-          name: build_report_${{ matrix.system }}.json
-          path: build_report_${{ matrix.system }}.json
+          name: build_report_${{ matrix.system }}_${{ matrix.package }}.json
+          path: build_report_${{ matrix.system }}_${{ matrix.package }}.json
           if-no-files-found: error
 
       - name: Upload to Cachix
@@ -190,7 +208,7 @@ jobs:
         continue-on-error: true
         run: |
           nix run nixpkgs#cachix -- authtoken "$CACHIX_TOKEN"
-          nix run nixpkgs#cachix -- push loneros $(nix path-info .#${{ inputs.packages }})
+          nix run nixpkgs#cachix -- push loneros $(nix path-info .#${{ matrix.package }})
 
   report:
     runs-on: ubuntu-latest
@@ -200,7 +218,7 @@ jobs:
       success: ${{ steps.report.outputs.success }}
 
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v6
         with:
           merge-multiple: true
 
@@ -209,17 +227,35 @@ jobs:
         run: |
           echo -e "## Build Results\n" >> report.md
           echo -e "Generated using [\`nixpkgs-review-gha\`](https://github.com/Defelo/nixpkgs-review-gha)\n" >> report.md
-          echo -e "Command: \`nix build .#${{ inputs.packages }}\`" >> report.md
           echo -e "Repository: ${{ inputs.repo }}" >> report.md
           echo -e "PR: #${{ inputs.pr-number }}" >> report.md
           echo -e "Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n" >> report.md
 
-          # 合并所有系统的报告
-          for report_file in build_report_*.json; do
-            if [[ -f "$report_file" ]]; then
-              jq -r '.md' "$report_file" >> report.md
-              echo "" >> report.md
-            fi
+          # 按包聚合所有系统的结果
+          # 提取所有唯一的包名
+          packages=$(jq -s '[.[].package] | unique | .[]' -r build_report_*.json)
+
+          for pkg in $packages; do
+            echo -e "### \`${pkg}\`\n" >> report.md
+
+            # 获取该包在所有系统上的结果
+            for report_file in build_report_*.json; do
+              file_pkg=$(jq -r '.package' "$report_file")
+              [[ "$file_pkg" == "$pkg" ]] || continue
+
+              file_system=$(jq -r '.system' "$report_file")
+              file_successful=$(jq -r '.successful' "$report_file")
+
+              if [[ "$file_successful" == "true" ]]; then
+                echo "- ${file_system}: :white_check_mark: Success" >> report.md
+              else
+                echo "- ${file_system}: :x: Failed" >> report.md
+                pkg_all_successful=false
+              fi
+            done
+
+            # 添加日志链接
+            echo "- Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n" >> report.md
           done
 
           # 检查是否所有构建都成功
@@ -240,7 +276,7 @@ jobs:
     needs: [report]
     if: ${{ !cancelled() && inputs.post-result }}
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v6
         with:
           name: report.md
 
