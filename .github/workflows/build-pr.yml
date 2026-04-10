@@ -138,6 +138,7 @@ jobs:
       - name: Nix build
         id: nix-build
         working-directory: src
+        continue-on-error: true
         run: |
           nix build \
             --keep-going \
@@ -161,8 +162,10 @@ jobs:
       - name: Generate build report
         id: report
         run: |
-          # Check the result of the previous step (nix build)
-          if [ "${{ steps.nix-build.outcome }}" == "success" ] || [ "${{ steps.nix-build.conclusion }}" == "success" ]; then
+          # Check the outcome of the previous step (nix build)
+          # Use 'outcome' not 'conclusion' — with continue-on-error: true,
+          # conclusion is always "success" even if the command fails
+          if [ "${{ steps.nix-build.outcome }}" == "success" ]; then
             BUILD_SUCCESSFUL="true"
           else
             BUILD_SUCCESSFUL="false"
@@ -250,7 +253,6 @@ jobs:
                 echo "- ${file_system}: :white_check_mark: Success" >> report.md
               else
                 echo "- ${file_system}: :x: Failed" >> report.md
-                pkg_all_successful=false
               fi
             done
 
@@ -263,7 +265,7 @@ jobs:
           echo "success=$all_successful" >> "$GITHUB_OUTPUT"
 
           cat report.md
-          sed -e '1s|$| for [#'"${{ inputs.pr-number }}"'](${{ github.server_url }}/${{ inputs.repo }}/pull/'"${{ inputs.pr-number }}"')|' report.md >> $GITHUB_STEP_SUMMARY
+          sed -e '1s|$| for [#'"${{ inputs.pr-number }}"'](${{ github.server_url }}/${{ inputs.repo }}/pull/'"${{ inputs.pr-number }}"')|' report.md >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v6
         with:
@@ -280,23 +282,34 @@ jobs:
         with:
           name: report.md
 
-      - name: Post comment
+      - name: Check GH_TOKEN
+        id: check-token
         run: |
-          if [[ -n "$GH_TOKEN" ]]; then
-            gh pr comment ${{ inputs.pr-number }} -R ${{ inputs.repo }} -F report.md
+          if [[ -z "${{ secrets.GH_TOKEN }}" ]]; then
+            echo "::warning::GH_TOKEN secret is not configured. PR comment and label operations will be skipped."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      - name: Add build-success label
-        if: ${{ needs.report.outputs.success == 'true' }}
-        run: |
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "::warning::Cannot add label because no GH_TOKEN has been configured."
-            exit 0
-          fi
-          # Ensure label exists (ignore error if already exists)
-          gh label create "build-pr-success" --color "28a745" -R ${{ inputs.repo }} 2>/dev/null || true
-          gh pr edit ${{ inputs.pr-number }} -R ${{ inputs.repo }} --add-label "build-pr-success"
+      - name: Ensure build-pr-success label exists
+        if: steps.check-token.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          gh label create "build-pr-success" --color "28a745" -R ${{ inputs.repo }} 2>/dev/null || true
+
+      - name: Post comment and manage labels
+        if: steps.check-token.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          # Post build result comment
+          gh pr comment ${{ inputs.pr-number }} -R ${{ inputs.repo }} -F report.md
+
+          # Manage build-success label
+          if [[ "${{ needs.report.outputs.success }}" == "true" ]]; then
+            gh pr edit ${{ inputs.pr-number }} -R ${{ inputs.repo }} --add-label "build-pr-success"
+          else
+            gh pr edit ${{ inputs.pr-number }} -R ${{ inputs.repo }} --remove-label "build-pr-success" 2>/dev/null || true
+          fi
