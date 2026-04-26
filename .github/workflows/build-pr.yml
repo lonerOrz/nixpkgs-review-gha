@@ -140,7 +140,8 @@ jobs:
         working-directory: src
         continue-on-error: true
         run: |
-          nix build \
+          NIXPKGS_ALLOW_UNFREE=1 nix build \
+            --impure \
             --keep-going \
             -L \
             --no-link \
