@@ -132,7 +132,7 @@ jobs:
         with:
           repository: ${{ inputs.repo }}
           ref: refs/pull/${{ inputs.pr-number }}/head
-          fetch-depth: 0
+          fetch-depth: 1
           path: src
 
       - name: Nix build
