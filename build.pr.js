@@ -13,7 +13,7 @@
   const WORKFLOW = "build-pr.yml";
   const DARWIN_SANDBOX = "relaxed";
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   const query = async (root, sel) => {
     while (true) {
@@ -25,45 +25,28 @@
 
   /* ---------- PR PAGE ---------- */
 
-  const prMatch = /^https:\/\/github.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(
-    location.href,
-  );
+  const prMatch = /^https:\/\/github.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(location.href);
 
   if (prMatch) {
     const [, repo, prNumber] = prMatch;
 
     const getPrDetails = () => {
-      const labels = [
-        ...document.querySelectorAll("div.js-issue-labels a"),
-      ].map((x) => x.innerText.trim());
+      const labels = [...document.querySelectorAll("div.js-issue-labels a")].map(x => x.innerText.trim());
 
-      const hasLinuxRebuilds = !labels.some((l) =>
-        /rebuild-linux:\s*0$/i.test(l),
-      );
-      const hasDarwinRebuilds = !labels.some((l) =>
-        /rebuild-darwin:\s*0$/i.test(l),
-      );
+      const hasLinuxRebuilds = !labels.some(l => /rebuild-linux:\s*0$/i.test(l));
+      const hasDarwinRebuilds = !labels.some(l => /rebuild-darwin:\s*0$/i.test(l));
       const hasRebuilds = hasLinuxRebuilds || hasDarwinRebuilds;
 
       return {
         "x86_64-linux": !hasRebuilds || hasLinuxRebuilds,
         "aarch64-linux": !hasRebuilds || hasLinuxRebuilds,
-        "x86_64-darwin":
-          !hasRebuilds || hasDarwinRebuilds
-            ? `yes_sandbox_${DARWIN_SANDBOX}`
-            : "no",
-        "aarch64-darwin":
-          !hasRebuilds || hasDarwinRebuilds
-            ? `yes_sandbox_${DARWIN_SANDBOX}`
-            : "no",
+        "x86_64-darwin": !hasRebuilds || hasDarwinRebuilds ? `yes_sandbox_${DARWIN_SANDBOX}` : "no",
+        "aarch64-darwin": !hasRebuilds || hasDarwinRebuilds ? `yes_sandbox_${DARWIN_SANDBOX}` : "no",
       };
     };
 
     const injectButton = async () => {
-      const actions = await query(
-        document,
-        "div[data-component=PH_Actions], .gh-header-show .gh-header-actions",
-      );
+      const actions = await query(document, "div[data-component=PH_Actions], .gh-header-show .gh-header-actions");
       if (actions.querySelector(".run-build-pr")) return;
 
       const btn = document.createElement("button");
@@ -79,9 +62,7 @@
         });
 
         const url =
-          `https://github.com/${GHA_REPO}` +
-          `/actions/workflows/${WORKFLOW}` +
-          `#dispatch:${params.toString()}`;
+          `https://github.com/${GHA_REPO}` + `/actions/workflows/${WORKFLOW}` + `#dispatch:${params.toString()}`;
 
         window.open(url, "_blank");
       };
@@ -99,10 +80,9 @@
 
   /* ---------- ACTIONS PAGE ---------- */
 
-  const actionsMatch =
-    /^https:\/\/github.com\/([^/]+\/[^/]+)\/actions\/workflows\/build-pr.yml#dispatch:(.*)$/.exec(
-      location.href,
-    );
+  const actionsMatch = /^https:\/\/github.com\/([^/]+\/[^/]+)\/actions\/workflows\/build-pr.yml#dispatch:(.*)$/.exec(
+    location.href,
+  );
 
   if (!actionsMatch || actionsMatch[1] !== GHA_REPO) return;
 
@@ -115,9 +95,7 @@
     const panel = await query(document, "details .workflow-dispatch");
 
     const setInput = (name, value) => {
-      const el = panel.querySelector(
-        `[name='inputs[${name}]']:not([type=hidden])`,
-      );
+      const el = panel.querySelector(`[name='inputs[${name}]']:not([type=hidden])`);
       if (!el) return;
 
       if (el.type === "checkbox") {
