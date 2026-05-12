@@ -87,6 +87,9 @@ jobs:
           echo "packages=$PACKAGES_JSON" >> "$GITHUB_OUTPUT"
 
   build:
+    name: build-${{ matrix.system }}-${{ matrix.package }}
+    permissions:
+      actions: read
     needs: [prepare]
     strategy:
       fail-fast: false
@@ -160,6 +163,21 @@ jobs:
           limit-access-to-actor: true
         continue-on-error: true
 
+      - name: Get job URL
+        id: job-info
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Retry up to 5 times, since the job metadata may not be immediately available
+          for i in {1..5}; do
+            JOB_URL=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+              --jq 'first(.jobs[] | select(.name == "build-${{ matrix.system }}-${{ matrix.package }}") | .html_url) // empty')
+            [[ -n "$JOB_URL" ]] && break
+            sleep 2
+          done
+          echo "job_url=${JOB_URL:-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}}" >> "$GITHUB_OUTPUT"
+
       - name: Generate build report
         id: report
         run: |
@@ -188,7 +206,8 @@ jobs:
              --arg successful "$BUILD_SUCCESSFUL" \
              --arg system "${{ matrix.system }}" \
              --arg package "${{ matrix.package }}" \
-             '{"md": $md, "successful": ($successful | test("true")), "system": $system, "package": $package}' > "$JSON_FILE"
+             --arg job_url "${{ steps.job-info.outputs.job_url }}" \
+             '{"md": $md, "successful": ($successful | test("true")), "system": $system, "package": $package, "job_url": $job_url}' > "$JSON_FILE"
 
           echo "successful=$BUILD_SUCCESSFUL" >> "$GITHUB_OUTPUT"
 
@@ -233,7 +252,7 @@ jobs:
           echo -e "Generated using [\`nixpkgs-review-gha\`](https://github.com/Defelo/nixpkgs-review-gha)\n" >> report.md
           echo -e "Repository: ${{ inputs.repo }}" >> report.md
           echo -e "PR: #${{ inputs.pr-number }}" >> report.md
-          echo -e "Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n" >> report.md
+          echo -e "Workflow: [${{ github.repository }}/actions/runs/${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n" >> report.md
 
           # Aggregate results across all systems by package
           # Extract unique package names
@@ -241,6 +260,8 @@ jobs:
 
           for pkg in $packages; do
             echo -e "### \`${pkg}\`\n" >> report.md
+            echo "| System | Status | Log |" >> report.md
+            echo "|--------|--------|-----|" >> report.md
 
             # Get results for this package on all systems
             for report_file in build_report_*.json; do
@@ -249,16 +270,21 @@ jobs:
 
               file_system=$(jq -r '.system' "$report_file")
               file_successful=$(jq -r '.successful' "$report_file")
+              file_job_url=$(jq -r '.job_url // ""' "$report_file")
 
               if [[ "$file_successful" == "true" ]]; then
-                echo "- ${file_system}: :white_check_mark: Success" >> report.md
+                status=":white_check_mark: Success"
               else
-                echo "- ${file_system}: :x: Failed" >> report.md
+                status=":x: Failed"
+              fi
+
+              if [[ -n "$file_job_url" ]]; then
+                echo "| ${file_system} | ${status} | [log](${file_job_url}) |" >> report.md
+              else
+                echo "| ${file_system} | ${status} | |" >> report.md
               fi
             done
 
-            # Add log link
-            echo "- Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> report.md
             echo "" >> report.md
           done
 
