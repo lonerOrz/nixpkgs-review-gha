@@ -74,6 +74,39 @@ on:
         default: true
 
 jobs:
+  check-creds:
+    runs-on: ubuntu-latest
+    outputs:
+      gh_token: ${{ steps.check.outputs.gh_token }}
+      cachix: ${{ steps.check.outputs.cachix }}
+      tg: ${{ steps.check.outputs.tg }}
+    steps:
+      - name: Check available credentials
+        id: check
+        run: |
+          # GH_TOKEN — for PR comment and label management
+          if [[ -n "${{ secrets.GH_TOKEN }}" ]]; then
+            echo "gh_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "gh_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GH_TOKEN secret is not configured. PR comment and label operations will be skipped."
+          fi
+
+          # CACHIX_AUTH_TOKEN — for upload to Cachix
+          if [[ -n "${{ secrets.CACHIX_AUTH_TOKEN }}" ]]; then
+            echo "cachix=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cachix=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # TG_BOT_TOKEN + TG_CHAT_ID — for Telegram notification
+          if [[ -n "${{ secrets.TG_BOT_TOKEN }}" ]] && [[ -n "${{ secrets.TG_CHAT_ID }}" ]]; then
+            echo "tg=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tg=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::TG_BOT_TOKEN or TG_CHAT_ID secret is not configured. Telegram notification will be skipped."
+          fi
+
   prepare:
     runs-on: ubuntu-latest
     outputs:
@@ -235,7 +268,7 @@ jobs:
 
   report:
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build, check-creds]
     if: ${{ !cancelled() && inputs.post-result }}
     outputs:
       success: ${{ steps.report.outputs.success }}
@@ -304,34 +337,86 @@ jobs:
           path: report.md
           if-no-files-found: error
 
+      - name: Generate Telegram summary
+        if: needs.check-creds.outputs.tg == 'true'
+        run: |
+          total=$(jq -s 'length' build_report_*.json)
+          successful=$(jq -s '[.[] | select(.successful == true)] | length' build_report_*.json)
+          workflow_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # HTML-escape a string: &, <, >, "
+          escape_html() {
+            sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
+          }
+
+          {
+            echo "<b>Build Results</b>"
+            echo "${{ inputs.repo }}#${{ inputs.pr-number }}"
+            echo ""
+            echo "✅ <b>${successful}/${total}</b> builds succeeded"
+          } > telegram-notification.txt
+
+          # List failed builds with log links (capped to avoid 4096 char limit)
+          if [[ "$successful" -lt "$total" ]]; then
+            echo "" >> telegram-notification.txt
+            echo "❌ <b>Failed builds:</b>" >> telegram-notification.txt
+
+            max_failures=20
+            count=0
+            total_failed=$((total - successful))
+
+            for f in $(printf '%s\n' build_report_*.json | sort); do
+              s=$(jq -r '.successful' "$f")
+              [[ "$s" == "true" ]] && continue
+
+              count=$((count + 1))
+              if [[ "$count" -gt "$max_failures" ]]; then
+                remaining=$((total_failed - max_failures))
+                echo "… and ${remaining} more failures" >> telegram-notification.txt
+                break
+              fi
+
+              system=$(jq -r '.system' "$f" | escape_html)
+              pkg=$(jq -r '.package' "$f" | escape_html)
+              url=$(jq -r '.job_url // ""' "$f" | escape_html)
+
+              if [[ -n "$url" ]]; then
+                echo "• ${system} · <code>${pkg}</code> — <a href=\"${url}\">log</a>" >> telegram-notification.txt
+              else
+                echo "• ${system} · <code>${pkg}</code>" >> telegram-notification.txt
+              fi
+            done
+          fi
+
+          echo "" >> telegram-notification.txt
+          echo "🔗 <a href=\"${workflow_url}\">Workflow</a>" >> telegram-notification.txt
+
+      - name: Upload TG notification
+        if: needs.check-creds.outputs.tg == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: telegram-notification.txt
+          path: telegram-notification.txt
+          if-no-files-found: error
+
   post-result:
     runs-on: ubuntu-latest
-    needs: [report]
+    needs: [report, check-creds]
     if: ${{ !cancelled() && inputs.post-result }}
     steps:
       - uses: actions/download-artifact@v6
         with:
           name: report.md
 
-      - name: Check GH_TOKEN
-        id: check-token
-        run: |
-          if [[ -z "${{ secrets.GH_TOKEN }}" ]]; then
-            echo "::warning::GH_TOKEN secret is not configured. PR comment and label operations will be skipped."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Ensure build-pr-success label exists
-        if: steps.check-token.outputs.available == 'true'
+        if: needs.check-creds.outputs.gh_token == 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           gh label create "build-pr-success" --color "28a745" -R ${{ inputs.repo }} 2>/dev/null || true
 
       - name: Post comment and manage labels
-        if: steps.check-token.outputs.available == 'true'
+        if: needs.check-creds.outputs.gh_token == 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
@@ -344,3 +429,18 @@ jobs:
           else
             gh pr edit ${{ inputs.pr-number }} -R ${{ inputs.repo }} --remove-label "build-pr-success" 2>/dev/null || true
           fi
+
+      - name: Download TG notification
+        if: needs.check-creds.outputs.tg == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: telegram-notification.txt
+
+      - name: Send Telegram notification
+        if: needs.check-creds.outputs.tg == 'true'
+        uses: appleboy/telegram-action@v1.0.1
+        with:
+          to: ${{ secrets.TG_CHAT_ID }}
+          token: ${{ secrets.TG_BOT_TOKEN }}
+          message_file: telegram-notification.txt
+          format: html
