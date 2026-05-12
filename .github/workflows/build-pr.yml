@@ -349,17 +349,22 @@ jobs:
             sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
           }
 
+          pr_url="https://github.com/${{ inputs.repo }}/pull/${{ inputs.pr-number }}"
+
           {
-            echo "<b>Build Results</b>"
-            echo "${{ inputs.repo }}#${{ inputs.pr-number }}"
+            echo "<b><a href=\"${pr_url}\">${{ inputs.repo }}#${{ inputs.pr-number }}</a></b>"
             echo ""
-            echo "✅ <b>${successful}/${total}</b> builds succeeded"
+
+            if [[ "$successful" -eq "$total" ]]; then
+              echo "✅ <b>${successful}/${total}</b> builds passed"
+            else
+              echo "❌ <b>${successful}/${total}</b> builds passed"
+            fi
           } > telegram-notification.txt
 
-          # List failed builds with log links (capped to avoid 4096 char limit)
           if [[ "$successful" -lt "$total" ]]; then
             echo "" >> telegram-notification.txt
-            echo "❌ <b>Failed builds:</b>" >> telegram-notification.txt
+            echo "Failed builds:" >> telegram-notification.txt
 
             max_failures=20
             count=0
@@ -372,7 +377,7 @@ jobs:
               count=$((count + 1))
               if [[ "$count" -gt "$max_failures" ]]; then
                 remaining=$((total_failed - max_failures))
-                echo "… and ${remaining} more failures" >> telegram-notification.txt
+                echo "… and ${remaining} more" >> telegram-notification.txt
                 break
               fi
 
@@ -389,7 +394,7 @@ jobs:
           fi
 
           echo "" >> telegram-notification.txt
-          echo "🔗 <a href=\"${workflow_url}\">Workflow</a>" >> telegram-notification.txt
+          echo "<a href=\"${workflow_url}\">Build details</a>" >> telegram-notification.txt
 
       - name: Upload TG notification
         if: needs.check-creds.outputs.tg == 'true'
