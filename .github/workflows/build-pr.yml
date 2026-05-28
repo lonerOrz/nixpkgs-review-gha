@@ -202,11 +202,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Retry up to 5 times, since the job metadata may not be immediately available
+          # 循环重试 5 次（确保接口数据就绪）并在获取 URL 的同时解析 "Nix build" 步骤的序号
           for i in {1..5}; do
-            JOB_URL=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
-              --jq 'first(.jobs[] | select(.name == "build-${{ matrix.system }}-${{ matrix.package }}") | .html_url) // empty')
-            [[ -n "$JOB_URL" ]] && break
+            JOB_DATA=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+              --jq '.jobs[] | select(.name == "build-${{ matrix.system }}-${{ matrix.package }}") // empty')
+
+            BASE_URL=$(echo "$JOB_DATA" | jq -r '.html_url // empty')
+
+            if [[ -n "$BASE_URL" ]]; then
+              STEP_NUM=$(echo "$JOB_DATA" | jq -r '[ .steps[] | select(.name == "Nix build") | .number ] | first // empty')
+              if [[ -n "$STEP_NUM" ]]; then
+                JOB_URL="${BASE_URL}#step:${STEP_NUM}:1"
+              else
+                JOB_URL="$BASE_URL"
+              fi
+              break
+            fi
             sleep 2
           done
           echo "job_url=${JOB_URL:-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}}" >> "$GITHUB_OUTPUT"
