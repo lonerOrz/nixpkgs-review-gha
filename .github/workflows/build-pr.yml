@@ -181,6 +181,7 @@ jobs:
             --keep-going \
             -L \
             --no-link \
+            --fallback \
             .#${{ matrix.package }}
 
       - name: Set GITHUB_TOKEN for upterm
