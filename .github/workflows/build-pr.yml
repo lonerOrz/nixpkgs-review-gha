@@ -161,14 +161,31 @@ jobs:
         with:
           swap-size-gb: 15
 
-      - name: Show resources
+      - name: Show build machine specs
         if: runner.os == 'Linux'
         run: |
-          echo "===== Disk ====="
-          df -h
+          echo "===== MACHINE ====="
+          echo "Runner: $RUNNER_NAME"
+          echo "OS: $RUNNER_OS"
+          echo "Arch: $RUNNER_ARCH"
+          echo "Image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
 
-          echo "===== Memory ====="
+          echo
+          echo "===== CPU ====="
+          nproc
+          lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket'
+
+          echo
+          echo "===== MEMORY ====="
           free -h
+
+          echo
+          echo "===== SWAP ====="
+          swapon --show
+
+          echo
+          echo "===== DISK ====="
+          df -h /
 
       - name: Setup Nix
         uses: ./gha/.github/actions/setup-nix
@@ -196,6 +213,8 @@ jobs:
         continue-on-error: true
         run: |
           NIXPKGS_ALLOW_UNFREE=1 nix build \
+            --max-jobs 1 \
+            --cores 2 \
             --impure \
             --keep-going \
             -L \
