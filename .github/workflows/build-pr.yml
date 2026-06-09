@@ -399,7 +399,20 @@ jobs:
         with:
           name: report.md
           path: report.md
+          archive: false
           if-no-files-found: error
+
+      - name: Output direct report link for PR
+        run: |
+          REPO="${{ github.repository }}"
+          RUN_ID="${{ github.run_id }}"
+          echo "======================================================"
+          echo "Copy the line below and paste it into the PR comment:"
+          echo "======================================================"
+          echo ""
+          echo "Build report: [View full report](https://nightly.link/$REPO/actions/runs/$RUN_ID/report.md)"
+          echo ""
+          echo "======================================================"
 
       - name: Generate Telegram summary
         if: needs.check-creds.outputs.tg == 'true'
