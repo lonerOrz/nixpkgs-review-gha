@@ -1,7 +1,10 @@
 name: build-pr
 run-name: "build ${{ inputs.packages }} from ${{ inputs.repo }}#${{ inputs.pr-number }}"
 
-permissions: {}
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
 
 on:
   workflow_dispatch:
@@ -250,7 +253,7 @@ jobs:
         id: job-info
         if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # 循环重试 5 次（确保接口数据就绪）并在获取 URL 的同时解析 "Nix build" 步骤的序号
           for i in {1..5}; do
@@ -477,14 +480,14 @@ jobs:
       - name: Ensure build-pr-success label exists
         if: needs.check-creds.outputs.gh_token == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           gh label create "build-pr-success" --color "28a745" -R ${{ inputs.repo }} 2>/dev/null || true
 
       - name: Post comment and manage labels
         if: needs.check-creds.outputs.gh_token == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           # Post build result comment
           gh pr comment ${{ inputs.pr-number }} -R ${{ inputs.repo }} -F report.md
