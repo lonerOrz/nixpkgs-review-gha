@@ -155,6 +155,9 @@ jobs:
             /.github/actions
             /build-pr
 
+      - name: setup nu
+        uses: ./.github/actions/setup-nu
+
       - name: Free Disk Space
         if: runner.os == 'Linux'
         uses: jlumbroso/free-disk-space@main
