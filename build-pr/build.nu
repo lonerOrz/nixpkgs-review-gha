@@ -39,18 +39,22 @@ let build_successful = $build.exit_code == 0
 
 let job_url = (gha group "get job url" {
   mut url = $"($env.GITHUB_SERVER_URL)/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)"
-  try {
-    for _ in 1..5 {
-      let jobs = (^gh api $"/repos/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)/jobs" | from json)
-      let job = ($jobs.jobs | where name == $"build-($system)-($package)" | first)
-      if ($job | is-not-null) {
-        let base = $job.html_url
-        let step = ($job.steps | where name == "Nix build" | get number? | first)
-        $url = if ($step | is-not-null) { $"($base)#step:($step):1" } else { $base }
-        break
-      }
+  for attempt in 1..5 {
+    let res = (^gh api $"/repos/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)/jobs" | complete)
+    if $res.exit_code != 0 {
+      print $"gh api attempt ($attempt) failed: ($res.stderr | str trim)"
       sleep 2sec
+      continue
     }
+    let jobs = ($res.stdout | from json)
+    let job = ($jobs.jobs | where name == $"build-($system)-($package)" | first)
+    if ($job | is-not-null) {
+      let base = $job.html_url
+      let step = ($job.steps | where name == "Nix build" | get number? | first)
+      $url = if ($step | is-not-null) { $"($base)#step:($step):1" } else { $base }
+      break
+    }
+    sleep 2sec
   }
   $url
 })
