@@ -198,7 +198,7 @@ jobs:
           MATRIX_PACKAGE: ${{ matrix.package }}
 
       - name: Start upterm session
-        if: ${{ inputs.upterm }}
+        if: ${{ inputs.upterm && failure() }}
         uses: owenthereal/action-upterm@v1
         with:
           limit-access-to-actor: true
