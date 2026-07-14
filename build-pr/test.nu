@@ -79,7 +79,7 @@ let summary = $"($work)/summary.md"
 "" | save -f $summary
 with-env {
   INPUTS: ({
-    "pr-number": "5", packages: "firefox chromium", system: "github:default-linux github:default-darwin",
+    "repo": "o/r", "pr-number": "5", packages: "firefox chromium", system: "github:default-linux github:default-darwin",
     cachix_name: "mycache", report_to_api: "false", pr_title: "t", pr_body: "b", pr_author: "u",
     pr_head_label: "u:br", pr_base_label: "N:master", pr_changed_files: "2", is_pr: "true", ref_name: "br",
   } | to json -r),
@@ -104,7 +104,7 @@ assert ($tg | str contains "chromium") "telegram lists failed chromium build"
 
 print "=== 5. post-result early-exit gate ==="
 with-env {
-  INPUTS: ({ "pr-number": "5" } | to json -r),
+  INPUTS: ({ "repo": "o/r", "pr-number": "5" } | to json -r),
   GITHUB_REPOSITORY: "o/r", GITHUB_TOKEN: "x", GH_TOKEN_ENABLED: "false", BUILD_SUCCESS: "true",
 } {
   # when GH_TOKEN_ENABLED != 'true' it must exit before any gh call (gh not installed here)
