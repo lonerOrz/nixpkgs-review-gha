@@ -16,7 +16,7 @@ gha group "generate combined report" {
 
   mut report = "## Build Results\n\n"
   $report = ($report + $"Generated using [`nixpkgs-review-gha`]\(https://github.com/Defelo/nixpkgs-review-gha\)\n")
-  $report = ($report + $"Repository: ($env.GITHUB_REPOSITORY)\n")
+  $report = ($report + $"Repository: ($inputs.repo)\n")
   $report = ($report + $"PR: #($inputs."pr-number")\n")
   $report = ($report + $"Workflow: [($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)]\(($env.GITHUB_SERVER_URL)/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)\)\n\n")
 
@@ -40,7 +40,7 @@ gha group "generate combined report" {
   print $report
 
   $report
-  | str replace -r '^.*' $"$0 for [#($inputs."pr-number")]\(($env.GITHUB_SERVER_URL)/($env.GITHUB_REPOSITORY)/pull/($inputs."pr-number")\)"
+  | str replace -r '^.*' $"$0 for [#($inputs."pr-number")]\(($env.GITHUB_SERVER_URL)/($inputs.repo)/pull/($inputs."pr-number")\)"
   | gha step-summary
 
   $all_successful | to json -r | gha output success
@@ -62,9 +62,9 @@ if $env.TG_ENABLED == 'true' {
     let total = ($reports | length)
     let successful = ($reports | where successful | length)
     let workflow_url = $"($env.GITHUB_SERVER_URL)/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)"
-    let pr_url = $"https://github.com/($env.GITHUB_REPOSITORY)/pull/($inputs."pr-number")"
+    let pr_url = $"https://github.com/($inputs.repo)/pull/($inputs."pr-number")"
 
-    mut tg = $"<b><a href=\"($pr_url)\">($env.GITHUB_REPOSITORY)#($inputs."pr-number")</a></b>\n\n"
+    mut tg = $"<b><a href=\"($pr_url)\">($inputs.repo)#($inputs."pr-number")</a></b>\n\n"
     if $successful == $total {
       $tg = ($tg + $"✅ <b>($successful)/($total)</b> builds passed\n")
     } else {
