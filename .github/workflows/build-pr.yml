@@ -1,10 +1,7 @@
 name: build-pr
 run-name: "build ${{ inputs.packages }} from ${{ inputs.repo }}#${{ inputs.pr-number }}"
 
-permissions:
-  contents: read
-  pull-requests: write
-  actions: read
+permissions: {}
 
 on:
   workflow_dispatch:
@@ -80,47 +77,49 @@ jobs:
   check-creds:
     runs-on: ubuntu-latest
     outputs:
-      gh_token: ${{ steps.check.outputs.gh_token }}
-      cachix: ${{ steps.check.outputs.cachix }}
-      tg: ${{ steps.check.outputs.tg }}
+      gh_token: ${{ steps.check-creds.outputs.gh_token }}
+      cachix: ${{ steps.check-creds.outputs.cachix }}
+      tg: ${{ steps.check-creds.outputs.tg }}
     steps:
-      - name: Check available credentials
-        id: check
-        run: |
-          # GH_TOKEN — for PR comment and label management
-          if [[ -n "${{ secrets.GH_TOKEN }}" ]]; then
-            echo "gh_token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "gh_token=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::GH_TOKEN secret is not configured. PR comment and label operations will be skipped."
-          fi
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/actions
+            /build-pr
 
-          # CACHIX_AUTH_TOKEN — for upload to Cachix
-          if [[ -n "${{ secrets.CACHIX_AUTH_TOKEN }}" ]]; then
-            echo "cachix=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "cachix=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: setup nu
+        uses: ./.github/actions/setup-nu
 
-          # TG_BOT_TOKEN + TG_CHAT_ID — for Telegram notification
-          if [[ -n "${{ secrets.TG_BOT_TOKEN }}" ]] && [[ -n "${{ secrets.TG_CHAT_ID }}" ]]; then
-            echo "tg=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "tg=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::TG_BOT_TOKEN or TG_CHAT_ID secret is not configured. Telegram notification will be skipped."
-          fi
+      - name: check credentials
+        id: check-creds
+        run: nu build-pr/check-creds.nu
+        env:
+          GH_TOKEN_SECRET: ${{ secrets.GH_TOKEN }}
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
 
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      packages: ${{ steps.parse.outputs.packages }}
+      packages: ${{ steps.prepare.outputs.packages }}
     steps:
-      - name: Parse packages
-        id: parse
-        run: |
-          # Split input packages by whitespace or commas, output as JSON array
-          PACKAGES_JSON=$(echo '${{ inputs.packages }}' | tr '\n\t,;' '    ' | tr -s ' ' | jq -R -s -c 'split(" ") | map(select(length > 0))')
-          echo "packages=$PACKAGES_JSON" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/actions
+            /build-pr
+
+      - name: setup nu
+        uses: ./.github/actions/setup-nu
+
+      - name: parse packages
+        id: prepare
+        run: nu build-pr/prepare.nu
+        env:
+          INPUTS: ${{ toJSON(github.event.inputs) }}
 
   build:
     name: build-${{ matrix.system }}-${{ matrix.package }}
@@ -149,10 +148,12 @@ jobs:
       || (matrix.system == 'aarch64-darwin' && 'macos-latest') }}
 
     steps:
-      - name: Checkout workflow repo
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
-          path: gha
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/actions
+            /build-pr
 
       - name: Free Disk Space
         if: runner.os == 'Linux'
@@ -164,34 +165,8 @@ jobs:
         with:
           swap-size-gb: 15
 
-      - name: Show build machine specs
-        if: runner.os == 'Linux'
-        run: |
-          echo "===== MACHINE ====="
-          echo "Runner: $RUNNER_NAME"
-          echo "OS: $RUNNER_OS"
-          echo "Arch: $RUNNER_ARCH"
-          echo "Image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
-
-          echo
-          echo "===== CPU ====="
-          nproc
-          lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket'
-
-          echo
-          echo "===== MEMORY ====="
-          free -h
-
-          echo
-          echo "===== SWAP ====="
-          swapon --show
-
-          echo
-          echo "===== DISK ====="
-          df -h /
-
       - name: Setup Nix
-        uses: ./gha/.github/actions/setup-nix
+        uses: ./.github/actions/setup-nix
         with:
           extra-nix-config: ${{ vars.EXTRA_NIX_CONFIG }}
           system: ${{ matrix.system }}
@@ -211,104 +186,21 @@ jobs:
           path: src
 
       - name: Nix build
-        id: nix-build
-        working-directory: src
+        id: build-nu
         continue-on-error: true
-        shell: bash
-        run: |
-          CORES=4
-
-          case "${{ matrix.package }}" in
-            *firefox*|*thunderbird*|*chromium*)
-              CORES=2
-              ;;
-          esac
-
-          echo "Using --cores=$CORES"
-
-          NIXPKGS_ALLOW_UNFREE=1 nix build \
-            --max-jobs 1 \
-            --cores "$CORES" \
-            --impure \
-            --keep-going \
-            -L \
-            --no-link \
-            --fallback \
-            .#${{ matrix.package }}
-
-      - name: Set GITHUB_TOKEN for upterm
-        if: ${{ inputs.upterm }}
-        run: echo "GITHUB_TOKEN=${GITHUB_TOKEN}" >> "$GITHUB_ENV"
+        run: nu build-pr/build.nu
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          MATRIX_SYSTEM: ${{ matrix.system }}
+          MATRIX_PACKAGE: ${{ matrix.package }}
 
       - name: Start upterm session
         if: ${{ inputs.upterm }}
         uses: owenthereal/action-upterm@v1
         with:
           limit-access-to-actor: true
-        continue-on-error: true
 
-      - name: Get job URL
-        id: job-info
-        if: always()
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          # 循环重试 5 次（确保接口数据就绪）并在获取 URL 的同时解析 "Nix build" 步骤的序号
-          for i in {1..5}; do
-            JOB_DATA=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
-              --jq '.jobs[] | select(.name == "build-${{ matrix.system }}-${{ matrix.package }}") // empty')
-
-            BASE_URL=$(echo "$JOB_DATA" | jq -r '.html_url // empty')
-
-            if [[ -n "$BASE_URL" ]]; then
-              STEP_NUM=$(echo "$JOB_DATA" | jq -r '[ .steps[] | select(.name == "Nix build") | .number ] | first // empty')
-              if [[ -n "$STEP_NUM" ]]; then
-                JOB_URL="${BASE_URL}#step:${STEP_NUM}:1"
-              else
-                JOB_URL="$BASE_URL"
-              fi
-              break
-            fi
-            sleep 2
-          done
-          echo "job_url=${JOB_URL:-${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}}" >> "$GITHUB_OUTPUT"
-
-      - name: Generate build report
-        id: report
-        run: |
-          # Check the outcome of the previous step (nix build)
-          # Use 'outcome' not 'conclusion' — with continue-on-error: true,
-          # conclusion is always "success" even if the command fails
-          if [ "${{ steps.nix-build.outcome }}" == "success" ]; then
-            BUILD_SUCCESSFUL="true"
-          else
-            BUILD_SUCCESSFUL="false"
-          fi
-
-          # Create report content (including package name and system)
-          REPORT_FILE="build_report_${{ matrix.system }}_${{ matrix.package }}.md"
-          JSON_FILE="build_report_${{ matrix.system }}_${{ matrix.package }}.json"
-
-          cat << EOF > "$REPORT_FILE"
-          ### \`${{ matrix.system }}\` - \`${{ matrix.package }}\`
-          - Package: \`${{ matrix.package }}\`
-          - Status: $(if [[ "$BUILD_SUCCESSFUL" == "true" ]]; then echo ":white_check_mark: Success"; else echo ":x: Failed"; fi)
-          - Logs: See [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          EOF
-
-          # Create JSON report
-          jq -n --arg md "$(cat "$REPORT_FILE")" \
-             --arg successful "$BUILD_SUCCESSFUL" \
-             --arg system "${{ matrix.system }}" \
-             --arg package "${{ matrix.package }}" \
-             --arg job_url "${{ steps.job-info.outputs.job_url }}" \
-             '{"md": $md, "successful": ($successful | test("true")), "system": $system, "package": $package, "job_url": $job_url}' > "$JSON_FILE"
-
-          echo "successful=$BUILD_SUCCESSFUL" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: build_report_${{ matrix.system }}_${{ matrix.package }}.json
           path: build_report_${{ matrix.system }}_${{ matrix.package }}.json
@@ -319,8 +211,8 @@ jobs:
           ${{
             matrix.system == 'x86_64-linux'
             && inputs.upload-cachix
-            && env.CACHIX_TOKEN != ''
-            && steps.report.outputs.successful == 'true'
+            && needs.check-creds.outputs.cachix == 'true'
+            && steps.build-nu.outputs.successful == 'true'
           }}
         working-directory: src
         env:
@@ -338,144 +230,37 @@ jobs:
       success: ${{ steps.report.outputs.success }}
 
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/actions
+            /build-pr
+
+      - name: setup nu
+        uses: ./.github/actions/setup-nu
+
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
 
-      - name: Generate combined report
+      - name: Generate and publish report
         id: report
-        run: |
-          echo -e "## Build Results\n" >> report.md
-          echo -e "Generated using [\`nixpkgs-review-gha\`](https://github.com/Defelo/nixpkgs-review-gha)\n" >> report.md
-          echo -e "Repository: ${{ inputs.repo }}" >> report.md
-          echo -e "PR: #${{ inputs.pr-number }}" >> report.md
-          echo -e "Workflow: [${{ github.repository }}/actions/runs/${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n" >> report.md
+        run: nu build-pr/report.nu
+        env:
+          INPUTS: ${{ toJSON(github.event.inputs) }}
+          TG_ENABLED: ${{ needs.check-creds.outputs.tg }}
 
-          # Aggregate results across all systems by package
-          # Extract unique package names
-          packages=$(jq -s '[.[].package] | unique | .[]' -r build_report_*.json)
-
-          for pkg in $packages; do
-            echo -e "### \`${pkg}\`\n" >> report.md
-            echo "| System | Status | Log |" >> report.md
-            echo "|--------|--------|-----|" >> report.md
-
-            # Get results for this package on all systems
-            for report_file in build_report_*.json; do
-              file_pkg=$(jq -r '.package' "$report_file")
-              [[ "$file_pkg" == "$pkg" ]] || continue
-
-              file_system=$(jq -r '.system' "$report_file")
-              file_successful=$(jq -r '.successful' "$report_file")
-              file_job_url=$(jq -r '.job_url // ""' "$report_file")
-
-              if [[ "$file_successful" == "true" ]]; then
-                status=":white_check_mark: Success"
-              else
-                status=":x: Failed"
-              fi
-
-              if [[ -n "$file_job_url" ]]; then
-                echo "| ${file_system} | ${status} | [log](${file_job_url}) |" >> report.md
-              else
-                echo "| ${file_system} | ${status} | |" >> report.md
-              fi
-            done
-
-            echo "" >> report.md
-          done
-
-          # Check if all builds succeeded
-          all_successful=$(jq -s '[.[].successful] | all' build_report_*.json 2>/dev/null || echo "false")
-          echo "success=$all_successful" >> "$GITHUB_OUTPUT"
-          echo "DEBUG: all_successful=$all_successful" >&2
-          echo "DEBUG: files=$(ls build_report_*.json 2>/dev/null | tr '\n' ' ')" >&2
-          echo "DEBUG: json content sample: $(jq -s '.' build_report_*.json 2>/dev/null | head -c 200)" >&2
-
-          cat report.md
-          sed -e '1s|$| for [#'"${{ inputs.pr-number }}"'](${{ github.server_url }}/${{ inputs.repo }}/pull/'"${{ inputs.pr-number }}"')|' report.md >> "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: report.md
           path: report.md
           archive: false
           if-no-files-found: error
 
-      - name: Output direct report link for PR
-        run: |
-          REPO="${{ github.repository }}"
-          RUN_ID="${{ github.run_id }}"
-          echo "======================================================"
-          echo "Copy the line below and paste it into the PR comment:"
-          echo "======================================================"
-          echo ""
-          echo "Build report: [View full report](https://nightly.link/$REPO/actions/runs/$RUN_ID/report.md)"
-          echo ""
-          echo "======================================================"
-
-      - name: Generate Telegram summary
-        if: needs.check-creds.outputs.tg == 'true'
-        run: |
-          total=$(jq -s 'length' build_report_*.json)
-          successful=$(jq -s '[.[] | select(.successful == true)] | length' build_report_*.json)
-          workflow_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-          # HTML-escape a string: &, <, >, "
-          escape_html() {
-            sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
-          }
-
-          pr_url="https://github.com/${{ inputs.repo }}/pull/${{ inputs.pr-number }}"
-
-          {
-            echo "<b><a href=\"${pr_url}\">${{ inputs.repo }}#${{ inputs.pr-number }}</a></b>"
-            echo ""
-
-            if [[ "$successful" -eq "$total" ]]; then
-              echo "✅ <b>${successful}/${total}</b> builds passed"
-            else
-              echo "❌ <b>${successful}/${total}</b> builds passed"
-            fi
-          } > telegram-notification.txt
-
-          if [[ "$successful" -lt "$total" ]]; then
-            echo "" >> telegram-notification.txt
-            echo "Failed builds:" >> telegram-notification.txt
-
-            max_failures=20
-            count=0
-            total_failed=$((total - successful))
-
-            for f in $(printf '%s\n' build_report_*.json | sort); do
-              s=$(jq -r '.successful' "$f")
-              [[ "$s" == "true" ]] && continue
-
-              count=$((count + 1))
-              if [[ "$count" -gt "$max_failures" ]]; then
-                remaining=$((total_failed - max_failures))
-                echo "… and ${remaining} more" >> telegram-notification.txt
-                break
-              fi
-
-              system=$(jq -r '.system' "$f" | escape_html)
-              pkg=$(jq -r '.package' "$f" | escape_html)
-              url=$(jq -r '.job_url // ""' "$f" | escape_html)
-
-              if [[ -n "$url" ]]; then
-                echo "• ${system} · <code>${pkg}</code> — <a href=\"${url}\">log</a>" >> telegram-notification.txt
-              else
-                echo "• ${system} · <code>${pkg}</code>" >> telegram-notification.txt
-              fi
-            done
-          fi
-
-          echo "" >> telegram-notification.txt
-          echo "<a href=\"${workflow_url}\">Build details</a>" >> telegram-notification.txt
-
       - name: Upload TG notification
         if: needs.check-creds.outputs.tg == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: telegram-notification.txt
           path: telegram-notification.txt
@@ -483,38 +268,37 @@ jobs:
 
   post-result:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     needs: [report, check-creds]
     if: ${{ !cancelled() && inputs.post-result }}
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/actions
+            /build-pr
+
+      - name: setup nu
+        uses: ./.github/actions/setup-nu
+
+      - uses: actions/download-artifact@v8
         with:
           name: report.md
 
-      - name: Ensure build-pr-success label exists
-        if: needs.check-creds.outputs.gh_token == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          gh label create "build-pr-success" --color "28a745" -R ${{ inputs.repo }} 2>/dev/null || true
-
       - name: Post comment and manage labels
         if: needs.check-creds.outputs.gh_token == 'true'
+        run: nu build-pr/post-result.nu
         env:
+          INPUTS: ${{ toJSON(github.event.inputs) }}
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          # Post build result comment
-          gh pr comment ${{ inputs.pr-number }} -R ${{ inputs.repo }} -F report.md
-
-          # Manage build-success label
-          if [[ "${{ needs.report.outputs.success }}" == "true" ]]; then
-            gh pr edit ${{ inputs.pr-number }} -R ${{ inputs.repo }} --add-label "build-pr-success"
-          else
-            gh pr edit ${{ inputs.pr-number }} -R ${{ inputs.repo }} --remove-label "build-pr-success" 2>/dev/null || true
-          fi
+          GH_TOKEN_ENABLED: ${{ needs.check-creds.outputs.gh_token }}
+          BUILD_SUCCESS: ${{ needs.report.outputs.success }}
 
       - name: Download TG notification
         if: needs.check-creds.outputs.tg == 'true'
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: telegram-notification.txt
 
