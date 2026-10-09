@@ -11,6 +11,9 @@ let jobsArg = if $inputs.builders == "remote" { "-j0" } else { "" }
 let system = nix config show system
 let buildArgs = --build-args=($"-L ($jobsArg) ($inputs.extra-build-args)")
 
+if $inputs.allow-unfree { $env.NIXPKGS_ALLOW_UNFREE = 1 }
+if $inputs.allow-insecure { $env.NIXPKGS_ALLOW_INSECURE = 1 }
+
 gha group "install packages" {
   let system = match $system {
     "x86_64-darwin" => "aarch64-darwin"
@@ -54,7 +57,7 @@ if $pushToAttic or $pushToCachix {
         return
       }
       $paths | str join "\n" | attic push --stdin $env.ATTIC_CACHE
-      http get -H { Authorization: $"Bearer ($env.ATTIC_TOKEN)" } $"($env.ATTIC_SERVER)_api/v1/cache-config/nixpkgs"
+      http get -H { Authorization: $"Bearer ($env.ATTIC_TOKEN)" } $"($env.ATTIC_SERVER)_api/v1/cache-config/($env.ATTIC_CACHE)"
       | select substituter_endpoint public_key is_public
     } else if $pushToCachix {
       with-env { CACHIX_SIGNING_KEY: ($env.CACHIX_SIGNING_KEY | default -e null) } {

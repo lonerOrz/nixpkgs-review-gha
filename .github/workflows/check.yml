@@ -23,13 +23,13 @@ jobs:
       || (matrix.system == 'aarch64-darwin' && 'macos-latest') }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: setup nix
         uses: ./.github/actions/setup-nix
         with:
           system: ${{ matrix.system }}
       - run: nix profile add .#attic-client
-      - uses: ryanccn/attic-action@5635a15ef0c5462194ffbd05d1daeddc74625c3a
+      - uses: ryanccn/attic-action@dc99f5eb1d5c0495aa26f7b56337b30011fa153e # v0.5.2
         with:
           endpoint: https://attic.defelo.de/
           cache: nixpkgs-review-gha

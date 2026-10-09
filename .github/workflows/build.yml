@@ -46,6 +46,16 @@ on:
         required: true
         type: boolean
         default: false
+      allow-unfree:
+        description: "Allow unfree packages"
+        required: true
+        type: boolean
+        default: true
+      allow-insecure:
+        description: "Allow insecure packages"
+        required: true
+        type: boolean
+        default: true
       builders:
         description: "Nix builders to use"
         required: true
@@ -86,7 +96,7 @@ jobs:
       || (matrix.system == 'riscv64-linux' && 'ubuntu-24.04-riscv') }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
@@ -110,8 +120,16 @@ jobs:
           ssh-key: ${{ inputs.builders != 'gha' && secrets.SSH_KEY || '' }}
           ssh-cert: ${{ inputs.builders != 'gha' && secrets.SSH_CERT || '' }}
 
+      - name: set environment variables
+        run: |
+          if [[ ${{ inputs.allow-unfree }} = true ]]; then echo "NIXPKGS_ALLOW_UNFREE=1" >> "$GITHUB_ENV"; fi
+          if [[ ${{ inputs.allow-insecure }} = true ]]; then echo "NIXPKGS_ALLOW_INSECURE=1" >> "$GITHUB_ENV"; fi
+
       - name: nix build
-        run: nix build --keep-going -L ${{ inputs.packages }}
+        run: >-
+          nix build --keep-going -L ${{
+            (inputs.allow-unfree || inputs.allow-insecure) && '--impure' || ''
+          }} ${{ inputs.packages }}
         if: ${{ inputs.packages != '' }}
 
       - name: set GITHUB_TOKEN
@@ -122,6 +140,6 @@ jobs:
 
       - name: start upterm session
         if: ${{ inputs.upterm }}
-        uses: owenthereal/action-upterm@v1
+        uses: owenthereal/action-upterm@42902ffb5244d6d63501c1daf4f4ec82884025f6 # v1.16.0
         with:
           limit-access-to-actor: true

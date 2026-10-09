@@ -1,0 +1,31 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    commit-message:
+      prefix: "workflows"
+    directory: "/"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "cargo"
+    commit-message:
+      prefix: "api"
+    directory: "/api"
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "nix"
+    commit-message:
+      prefix: "flake"
+    cooldown:
+      exclude:
+        - "nixpkgs" # Waiting for Hydra is enough of a cooldown
+    directory: "/"
+    schedule:
+      interval: "daily"

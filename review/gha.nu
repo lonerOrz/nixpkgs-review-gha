@@ -50,6 +50,8 @@ export def "gha review-inputs" [] {
     x86_64-linux
     aarch64-linux
     riscv64-linux
+    allow-unfree
+    allow-insecure
     push-to-cache
     upterm
     post-result
