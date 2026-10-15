@@ -89,19 +89,23 @@
   const inputs = new URLSearchParams(actionsMatch[2]);
 
   (async () => {
-    const summary = await query(document, "details > summary.btn");
-    summary.click();
-
-    const panel = await query(document, "details .workflow-dispatch");
+    (
+      await query(
+        document,
+        'details > summary.btn, react-app.loaded [data-component="PH_Actions"] button[data-variant="primary"]',
+      )
+    ).click();
+    await query(document, ':is(details .workflow-dispatch, [role="dialog"]) [name="inputs[repo]"]');
 
     const setInput = (name, value) => {
-      const el = panel.querySelector(`[name='inputs[${name}]']:not([type=hidden])`);
-      if (!el) return;
+      const selector = `:is(details .workflow-dispatch, [role="dialog"]) [name='inputs[${name}]']`;
+      const input = document.querySelector(`${selector}:not([type=hidden])`);
+      if (!input) return;
 
-      if (el.type === "checkbox") {
-        el.checked = value === "true" || value === true;
+      if (input.type === "checkbox") {
+        input.checked = value === "true" || value === true;
       } else {
-        el.value = value;
+        input.value = value;
       }
     };
 
@@ -109,6 +113,8 @@
       setInput(name, value);
     }
 
-    panel.querySelector("button[type=submit]")?.focus();
+    document
+      .querySelector('details .workflow-dispatch button[type=submit], [role="dialog"] button[type=submit]')
+      ?.focus();
   })();
 })();
