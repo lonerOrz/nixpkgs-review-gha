@@ -10,15 +10,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /.github/actions
             /build-pr
 
       - name: setup nu
-        uses: ./.github/actions/setup-nu
+        uses: $/.github/actions/setup-nu
 
       - name: run build-pr tests
         run: nu build-pr/test.nu
