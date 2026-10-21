@@ -76,19 +76,17 @@
           return;
         }
 
-        // `packages` is a required input of build-pr.yml and it cannot be
-        // guessed: a PR routinely touches several packages (or none that the
-        // title names), so the user always fills it in explicitly.
-        const packages = (prompt(`Packages to build for ${repo}#${prNumber} (comma separated)`) ?? "").trim();
-        if (packages === "") return;
-
+        // `packages` is deliberately not sent. A PR routinely touches several
+        // packages (or none that the title names), so it cannot be guessed,
+        // and the dispatch form is the natural place to type it: build-pr.yml
+        // marks it required, so GitHub rejects an empty submission on its own.
+        //
         // `state` is only used for UI gating, it is not a workflow input.
         const { state: _state, ...buildInputs } = getPrDetails();
 
         const params = new URLSearchParams({
           repo,
           "pr-number": prNumber,
-          packages,
           ...buildInputs,
         });
 
@@ -151,22 +149,8 @@
       return true;
     };
 
-    // Required inputs of build-pr.yml. If any is missing from the form we abort
-    // instead of letting the user submit a dispatch that will be rejected.
-    const required = ["repo", "pr-number", "packages"];
-    const missing = [];
-
     for (const [name, value] of inputs) {
-      if (!setInput(name, value) && required.includes(name)) missing.push(name);
-    }
-
-    for (const name of required) {
-      if (![...inputs.keys()].includes(name)) missing.push(name);
-    }
-
-    if (missing.length > 0) {
-      alert(`build-pr launcher: missing required input(s): ${[...new Set(missing)].join(", ")}`);
-      return;
+      setInput(name, value);
     }
 
     document
