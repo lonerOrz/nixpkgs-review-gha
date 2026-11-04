@@ -41,9 +41,8 @@
 
       // Optional: a merged/closed PR cannot be built, so the button is disabled.
       const state = (
-        document.querySelector(
-          "div[data-component=TitleArea] div[data-component=PH_LeadingVisual] span, span.State",
-        )?.innerText ?? ""
+        document.querySelector("div[data-component=TitleArea] div[data-component=PH_LeadingVisual] span, span.State")
+          ?.innerText ?? ""
       )
         .trim()
         .toUpperCase();
