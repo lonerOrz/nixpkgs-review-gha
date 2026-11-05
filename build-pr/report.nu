@@ -1,100 +1,146 @@
 use gha.nu *
 
-def escape_html [] {
-  $in
-  | str replace -a '&' '&amp;'
-  | str replace -a '<' '&lt;'
-  | str replace -a '>' '&gt;'
-  | str replace -a '"' '&quot;'
-}
-
 let inputs = gha build-pr-inputs
 
-gha group "generate combined report" {
-  let reports = (ls build_report_*.json | get name | each { open $in })
-  let packages = ($reports | get package | uniq)
+let pr_enabled = ($env.PR_ENABLED == 'true')
+let tg_enabled = ($env.TG_ENABLED == 'true')
 
-  mut report = "## Build Results\n\n"
-  $report = ($report + $"Generated using [`nixpkgs-review-gha`]\(https://github.com/Defelo/nixpkgs-review-gha\)\n")
-  $report = ($report + $"Repository: ($inputs.repo)\n")
-  $report = ($report + $"PR: #($inputs."pr-number")\n")
-  $report = ($report + $"Workflow: [($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)]\(($env.GITHUB_SERVER_URL)/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)\)\n\n")
+let reports = (
+    glob "build_report_*.json"
+    | each {|path| open $path }
+)
 
-  for pkg in $packages {
-    $report = ($report + $"### `($pkg)`\n\n")
-    $report = ($report + "| System | Status | Log |\n")
-    $report = ($report + "|--------|--------|-----|\n")
-    for r in ($reports | where package == $pkg) {
-      let status = if $r.successful { ":white_check_mark: Success" } else { ":x: Failed" }
-      if ($r.job_url | is-not-empty) {
-        $report = ($report + $"| ($r.system) | ($status) | [log]\(($r.job_url)\) |\n")
-      } else {
-        $report = ($report + $"| ($r.system) | ($status) | |\n")
-      }
+let total = ($reports | length)
+let successful = ($reports | where {|r| $r.successful? == true } | length)
+let failed = ($total - $successful)
+
+let all_successful = ($total > 0 and $successful == $total)
+
+let failed_reports = (
+    $reports
+    | where {|r| $r.successful? != true }
+    | sort-by system package
+)
+
+let package_names = (
+    $reports
+    | get package
+    | uniq
+    | sort
+)
+
+let packages = (
+    $package_names
+    | each {|pkg|
+        {
+            name: $pkg
+            reports: (
+                $reports
+                | where package == $pkg
+                | sort-by successful system
+            )
+        }
     }
-    $report = ($report + "\n")
-  }
+)
 
-  let all_successful = ($reports | get successful | all { $in })
-  $report | save -f report.md
-  print $report
+let pr_number = ($inputs."pr-number" | into string)
 
-  $report
-  | str replace -r '^.*' $"$0 for [#($inputs."pr-number")]\(($env.GITHUB_SERVER_URL)/($inputs.repo)/pull/($inputs."pr-number")\)"
-  | gha step-summary
+let pr_url = (
+    $env.GITHUB_SERVER_URL
+    + "/"
+    + $inputs.repo
+    + "/pull/"
+    + $pr_number
+)
 
-  $all_successful | to json -r | gha output success
+let workflow_url = (
+    $env.GITHUB_SERVER_URL
+    + "/"
+    + $env.GITHUB_REPOSITORY
+    + "/actions/runs/"
+    + $env.GITHUB_RUN_ID
+)
+
+let context = {
+    all_successful: $all_successful
+    successful: $successful
+    failed: $failed
+    total: $total
+    repo: $inputs.repo
+    pr_number: $pr_number
+    pr_url: $pr_url
+    workflow_url: $workflow_url
+    packages: $packages
+    failed_reports: ($failed_reports | first 20)
+    failed_omitted: ([($failed - 20), 0] | math max)
 }
 
-gha group "output report link" {
-  print "======================================================"
-  print "Copy the line below and paste it into the PR comment:"
-  print "======================================================"
-  print ""
-  print $"Build report: [View full report]\(https://nightly.link/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)/report.md\)"
-  print ""
-  print "======================================================"
+let context_json = ($context | to json)
+
+let template_dir = (
+    $env.GITHUB_WORKSPACE
+    | path join ".github" "templates"
+)
+
+let pr_template = ($template_dir | path join "report-pr.md")
+let tg_template = ($template_dir | path join "report-tg.html")
+
+gha group "generate PR report" {
+  let result = (
+      $context_json
+      | ^tera --template $pr_template --stdin
+      | complete
+  )
+
+    if $result.exit_code != 0 {
+        error make {
+            msg: $"Failed to render report-pr.md: ($result.stderr | str trim)"
+        }
+    }
+
+    let report = $result.stdout
+
+    if $pr_enabled {
+        $report | save -f report.md
+        print "Generated report.md"
+    }
+
+    print $report
+    $report | gha step-summary
+
+    $all_successful | to json -r | gha output success
 }
 
-if $env.TG_ENABLED == 'true' {
-  gha group "generate telegram summary" {
-    let reports = (ls build_report_*.json | get name | each { open $in })
-    let total = ($reports | length)
-    let successful = ($reports | where successful | length)
-    let workflow_url = $"($env.GITHUB_SERVER_URL)/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)"
-    let pr_url = $"https://github.com/($inputs.repo)/pull/($inputs."pr-number")"
+if $pr_enabled {
+    gha group "output PR report link" {
+        let report_url = (
+            "https://nightly.link/"
+            + $env.GITHUB_REPOSITORY
+            + "/actions/runs/"
+            + $env.GITHUB_RUN_ID
+            + "/report.md"
+        )
 
-    mut tg = $"<b><a href=\"($pr_url)\">($inputs.repo)#($inputs."pr-number")</a></b>\n\n"
-    if $successful == $total {
-      $tg = ($tg + $"✅ <b>($successful)/($total)</b> builds passed\n")
-    } else {
-      $tg = ($tg + $"❌ <b>($successful)/($total)</b> builds passed\n")
+        print ("Build report: [View full report](" + $report_url + ")")
     }
+}
 
-    if $successful < $total {
-      $tg = ($tg + "\nFailed builds:\n")
-      let failed = ($reports | where successful == false | sort-by system)
-      let max = 20
-      mut count = 0
-      let total_failed = ($total - $successful)
-      for r in $failed {
-        $count = ($count + 1)
-        if $count > $max {
-          $tg = ($tg + $"… and ($total_failed - $max) more\n")
-          break
+if $tg_enabled {
+    gha group "generate Telegram notification" {
+      let result = (
+          $context_json
+          | ^tera --template $tg_template --stdin --escape
+          | complete
+      )
+
+        if $result.exit_code != 0 {
+            error make {
+                msg: $"Failed to render report-tg.html: ($result.stderr | str trim)"
+            }
         }
-        let sys = ($r.system | escape_html)
-        let pkg = ($r.package | escape_html)
-        let url = ($r.job_url | escape_html)
-        if ($url | is-not-empty) {
-          $tg = ($tg + $"• ($sys) · <code>($pkg)</code> — <a href=\"($url)\">log</a>\n")
-        } else {
-          $tg = ($tg + $"• ($sys) · <code>($pkg)</code>\n")
-        }
-      }
+
+        $result.stdout | save -f telegram-notification.txt
+
+        print "Generated telegram-notification.txt"
     }
-
-    $tg = ($tg + $"\n<a href=\"($workflow_url)\">Build details</a>\n")
-    $tg | save -f telegram-notification.txt
-  }
 }
