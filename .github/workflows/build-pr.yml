@@ -141,7 +141,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   build:
-    name: build-${{ matrix.system }}-${{ matrix.package }}
+    name: build-${{ matrix.package }}-${{ matrix.system }}
     permissions:
       actions: read
     needs: [prepare, check-creds]

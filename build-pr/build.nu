@@ -67,7 +67,7 @@ let job_url = (gha group "get job url" {
     }
 
     let jobs = ($res.stdout | from json)
-    let job = ($jobs.jobs | where name == $"build-($system)-($package)" | first)
+    let job = ($jobs.jobs | where name == $"build-($package)-($system)" | first)
 
     if $job != null {
       let base = $job.html_url

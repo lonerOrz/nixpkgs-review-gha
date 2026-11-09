@@ -1,20 +1,19 @@
-<b><a href="{{ pr_url }}">{{ repo }}#{{ pr_number }}</a></b>
-
+<a href="{{ pr_url }}"><b>{{ repo }}#{{ pr_number }}</b></a>
 {% if total == 0 -%}
 ⚠️ <b>No build reports found</b>
-The build result cannot be determined.
+The result cannot be determined.
 {% elif all_successful -%}
-:white_check_mark: <b>{{ successful }}/{{ total }} builds passed</b>
+✅ <b>{{ successful }}/{{ total }} builds passed</b>
 {% else -%}
 ❌ <b>{{ successful }}/{{ total }} builds passed</b>
-{% endif %}
-{% if failed_reports | length > 0 %}
+{% endif -%}
+{% if failed_reports | length > 0 -%}
 <b>Failed builds:</b>
-{% for report in failed_reports | slice(end=20) %}
+{% for report in failed_reports -%}
 • <code>{{ report.system }}</code> · <code>{{ report.package }}</code>{% if report.job_url %} — <a href="{{ report.job_url }}">logs</a>{% endif %}
-{% endfor %}
-{% if failed_reports | length > 20 %}
-… and {{ failed_reports | length - 20 }} more
-{% endif %}
-{% endif %}
-<a href="{{ workflow_url }}">Build details</a>
+{% endfor -%}
+{% if failed_omitted > 0 -%}
+… and {{ failed_omitted }} more
+{% endif -%}
+{% endif -%}
+<a href="{{ workflow_url }}">Build details →</a>
