@@ -10,6 +10,7 @@
     "*.nu"
     "*.patch"
     "*.snap"
+    "*.html"
     "*/.gitignore"
     ".gitignore"
     "LICENSE"

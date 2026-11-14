@@ -3,6 +3,18 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
+    '.github/workflows/build-pr.yml':
+        - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
+        - 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333'
+        - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
+        - 'appleboy/telegram-action@221e6b684967abe813051ee4a37dd61770a83ad3'
+        - 'cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24'
+        - 'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8'
+        - 'jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6'
+        - 'owenthereal/action-upterm@42902ffb5244d6d63501c1daf4f4ec82884025f6'
+        - 'pierotofy/set-swap-space@fc79b3f67fa8a838184ce84a674ca12238d2c761'
+        - 'srz-zumix/post-run-action@42756f7452b9439d0365b7e087b2c364f54209c6'
+        - 'wimpysworld/nothing-but-nix@baf7355748bb5651f08b839669d6bb39051b2874'
     '.github/workflows/build.yml':
         - 'cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24'
         - 'owenthereal/action-upterm@6c2d60e09009f59cb4c45c88767c78701f14d121'
@@ -45,11 +57,36 @@ dependencies:
         commit: 'sha1-13d8dd58da0234aa297dedd986986ccb8e7f3e24'
         owner_id: 36824654
         repo_id: 212301524
+    'appleboy/telegram-action@221e6b684967abe813051ee4a37dd61770a83ad3':
+        ref: 'v1.0.1'
+        commit: 'sha1-221e6b684967abe813051ee4a37dd61770a83ad3'
+        owner_id: 21979
+        repo_id: 171018186
+    'dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8':
+        ref: 'v1'
+        commit: 'sha1-683b588c487a69d01f6c6ddf40f036ff682cc2c8'
+        owner_id: 1940490
+        repo_id: 260749683
+    'jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6':
+        ref: 'v2.0.0'
+        commit: 'sha1-ceedf095f4ec1a097402bc6bd80831f2e1a6fde6'
+        owner_id: 330458550
+        repo_id: 506133999
+    'owenthereal/action-upterm@42902ffb5244d6d63501c1daf4f4ec82884025f6':
+        ref: 'v1.16.0'
+        commit: 'sha1-42902ffb5244d6d63501c1daf4f4ec82884025f6'
+        owner_id: 169064
+        repo_id: 797886005
     'owenthereal/action-upterm@6c2d60e09009f59cb4c45c88767c78701f14d121':
         ref: 'v2.8.1'
         commit: 'sha1-6c2d60e09009f59cb4c45c88767c78701f14d121'
         owner_id: 169064
         repo_id: 797886005
+    'pierotofy/set-swap-space@fc79b3f67fa8a838184ce84a674ca12238d2c761':
+        ref: 'master'
+        commit: 'sha1-fc79b3f67fa8a838184ce84a674ca12238d2c761'
+        owner_id: 1951843
+        repo_id: 379024912
     'ryanccn/attic-action@dc99f5eb1d5c0495aa26f7b56337b30011fa153e':
         ref: 'v0.5.2'
         commit: 'sha1-dc99f5eb1d5c0495aa26f7b56337b30011fa153e'

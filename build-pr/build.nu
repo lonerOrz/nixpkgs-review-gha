@@ -1,0 +1,115 @@
+use gha.nu *
+
+let system = $env.MATRIX_SYSTEM
+let package = $env.MATRIX_PACKAGE
+
+if $env.RUNNER_OS == "Linux" {
+  gha group "machine specs" {
+    print "===== MACHINE ====="
+    print $"Runner: ($env.RUNNER_NAME)"
+    print $"OS: ($env.RUNNER_OS)"
+    print $"Arch: ($env.RUNNER_ARCH)"
+    print $"Image: (($env.ImageOS? | default 'unknown')) (($env.ImageVersion? | default 'unknown'))"
+    print ""
+    print "===== CPU ====="
+    ^nproc
+    ^lscpu
+    | lines
+    | where {|l| ["Model name" "CPU(s)" "Thread" "Core" "Socket"] | any {|p| $l | str contains $p }}
+    print ""
+    print "===== MEMORY ====="
+    ^free -h
+    print ""
+    print "===== SWAP ====="
+    ^swapon --show
+    print ""
+    print "===== DISK ====="
+    ^df -h /
+  }
+}
+
+# Heavy browsers get fewer cores to reduce OOM risk.
+let cores = if (["firefox" "thunderbird" "chromium"] | any {|p|
+  $package | str downcase | str contains $p
+}) {
+  2
+} else {
+  4
+}
+print $"Using --cores=($cores)"
+
+let build = (do {
+  cd src
+  ^nix build --max-jobs 1 --cores $cores --impure --keep-going -L --no-link --fallback $".#($package)"
+} | complete)
+
+gha group "nix build" {
+  print $build.stdout
+  print $build.stderr
+}
+
+let build_successful = $build.exit_code == 0
+
+# Best-effort: resolve a deep link to this job's "Nix build" step.
+# Falls back to the workflow run URL if the API is unavailable.
+let job_url = (gha group "get job url" {
+  mut url = $"($env.GITHUB_SERVER_URL)/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)"
+
+  for attempt in 1..5 {
+    let res = (do -i {
+      ^gh api $"/repos/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)/jobs"
+    } | complete)
+
+    if $res.exit_code != 0 {
+      print $"gh api attempt ($attempt) failed: ($res.stderr | str trim)"
+      sleep 2sec
+      continue
+    }
+
+    let jobs = ($res.stdout | from json)
+    let job = ($jobs.jobs | where name == $"build-($package)-($system)" | first)
+
+    if $job != null {
+      let base = $job.html_url
+      let step = ($job.steps | where name == "Nix build" | get number? | first)
+      $url = if $step != null { $"($base)#step:($step):1" } else { $base }
+      break
+    }
+
+    sleep 2sec
+  }
+
+  $url
+})
+
+gha group "generate build report" {
+  let status = if $build_successful { ":white_check_mark: Success" } else { ":x: Failed" }
+  let log_link = if ($job_url | is-not-empty) {
+    $job_url
+  } else {
+    $"($env.GITHUB_SERVER_URL)/($env.GITHUB_REPOSITORY)/actions/runs/($env.GITHUB_RUN_ID)"
+  }
+
+  let report_md = $"### `($system)` - `($package)`
+- Package: `($package)`
+- Status: ($status)
+- Logs: [view](($log_link))
+"
+
+  $report_md | save -f $"build_report_($package)_($system).md"
+
+  {
+    md: $report_md
+    successful: $build_successful
+    system: $system
+    package: $package
+    job_url: $job_url
+  } | to json | save -f $"build_report_($package)_($system).json"
+
+  print $report_md
+  $build_successful | to json -r | gha output successful
+}
+
+if not $build_successful {
+  exit 1
+}
